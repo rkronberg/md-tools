@@ -65,7 +65,6 @@ def main():
               for i in range(n_blocks-1)]
     blocks.append(range((n_blocks-1)*frames_per_block, n_frames))
 
-    binsize = 0.1
     nbins = int(c//binsize)
     z = np.linspace(binsize, c-binsize, nbins)
 
