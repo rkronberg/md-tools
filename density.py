@@ -4,7 +4,6 @@ from joblib import Parallel, delayed
 from argparse import ArgumentParser
 from os import path
 from time import time
-import matplotlib.pyplot as plt
 
 # MDAnalysis
 import MDAnalysis as mda
