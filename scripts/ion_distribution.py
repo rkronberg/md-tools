@@ -7,7 +7,7 @@ from time import time
 
 # MDAnalysis
 import MDAnalysis as mda
-from MDAnalysis.analysis.lineardensity import LinearDensity
+from MDAnalysis.analysis.distances import distance_array
 
 
 def parse():
@@ -22,18 +22,40 @@ def parse():
                         help='Lattice vectors in angstroms (a, b, c)', nargs=3)
     parser.add_argument('-b', '--bin_size', required=True, type=float,
                         help='Bin width in angstroms')
-    parser.add_argument('-f', '--n_frames', type=int,
+    parser.add_argument('-s', '--species', required=True, type=str,
+                        help='Type of ionic species (H3O+ or OH-)')
+    parser.add_argument('-ns', '--n_species', required=True, type=int,
+                        help='Number of ionic species')
+    parser.add_argument('-nf', '--n_frames', type=int,
                         help='Total number of frames')
 
     return parser.parse_args()
 
 
-def density(atomgroup, binsize, block):
+def sort_acid(CN, n_species):
 
-    ldens = LinearDensity(atomgroup, binsize=binsize, verbose=True)
-    ldens.run(start=block.start, stop=block.stop)
+    return np.argpartition(CN, -n_species)[-n_species:]
 
-    return ldens.results.z.pos
+
+def sort_base(CN, n_species):
+
+    return np.argpartition(CN, n_species)[:n_species]
+
+
+def ions(u, oxygen, hydrogen, n_species, func, block):
+
+    rc = 1.32
+    z_ion = np.zeros((len(block), n_species))
+
+    for i, ts in enumerate(u.trajectory[block.start:block.stop]):
+        print('Processing blocks %.1f%%' % (100*i/len(block)), end='\r')
+        rOH = distance_array(oxygen.positions, hydrogen.positions,
+                             box=u.dimensions)
+        CN = np.sum((1-(rOH/rc)**16)/(1-(rOH/rc)**56), axis=1)
+        ind = func(CN, n_species)
+        z_ion[i, :] = oxygen.positions[ind][:, 2]
+
+    return z_ion
 
 
 def main():
@@ -43,6 +65,8 @@ def main():
     n_jobs = args.n_cpu
     binsize = args.bin_size
     n_frames = args.n_frames
+    species = args.species
+    n_species = args.n_species
     a, b, c = args.cell_vectors
 
     CURRENT_PATH = path.dirname(path.realpath(__file__))
@@ -52,7 +76,13 @@ def main():
     u = mda.Universe(input, dt=5e-4)
     u.add_TopologyAttr('charges')
     u.dimensions = np.array([a, b, c, 90, 90, 90])
-    water = u.select_atoms('name O or name H')
+    oxygen = u.select_atoms('name O')
+    hydrogen = u.select_atoms('name H')
+
+    if species == 'H3O+':
+        func = sort_acid
+    elif species == 'OH-':
+        func = sort_base
 
     if n_frames is None:
         print('Calculating number of frames: ', end='\r')
@@ -69,11 +99,14 @@ def main():
     z = np.linspace(binsize, c-binsize, nbins)
 
     print('Analyzing...')
-    results = Parallel(n_jobs=n_jobs)(delayed(density)(
-        water, binsize, block) for block in blocks)
+    results = Parallel(n_jobs=n_jobs)(delayed(ions)(
+        u, oxygen, hydrogen, n_species, func, block) for block in blocks)
 
-    df = pd.DataFrame({'z-coord': z, 'density': np.mean(results, axis=0)})
-    df.to_csv('%s/%s.ldens' % (DATA_PATH, base), index=False)
+    results = np.concatenate(results).ravel()
+    hist, _ = np.histogram(results, bins=nbins, range=(0.0, c), density=True)
+
+    df = pd.DataFrame({'z-coord': z, 'density': hist})
+    df.to_csv('%s/%s.ions' % (DATA_PATH, base), index=False)
 
     print('\nProgram executed in %.0f seconds' % (time()-t0))
 
