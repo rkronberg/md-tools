@@ -5,6 +5,8 @@ from argparse import ArgumentParser
 from os import path
 from time import time
 
+from . import trj2blocks
+
 # MDAnalysis
 import MDAnalysis as mda
 from MDAnalysis.analysis.lineardensity import LinearDensity
@@ -54,16 +56,7 @@ def main():
     u.dimensions = np.array([a, b, c, 90, 90, 90])
     water = u.select_atoms('name O or name H')
 
-    if n_frames is None:
-        print('Calculating number of frames: ', end='\r')
-        n_frames = u.trajectory.n_frames
-        print('Calculating number of frames: %i' % n_frames)
-
-    n_blocks = n_jobs
-    frames_per_block = n_frames//n_blocks
-    blocks = [range(i*frames_per_block, (i+1)*frames_per_block)
-              for i in range(n_blocks-1)]
-    blocks.append(range((n_blocks-1)*frames_per_block, n_frames))
+    blocks = trj2blocks.get_blocks(u, n_jobs)
 
     nbins = int(c//binsize)
     z = np.linspace(binsize, c-binsize, nbins)

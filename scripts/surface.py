@@ -5,6 +5,8 @@ from argparse import ArgumentParser
 from os import path
 from time import time
 
+from . import trj2blocks
+
 # MDAnalysis
 import MDAnalysis as mda
 from MDAnalysis.analysis.distances import distance_array
@@ -22,8 +24,6 @@ def parse():
                         help='Lattice vectors in angstroms (a, b, c)', nargs=3)
     parser.add_argument('-nb', '--n_bins', required=True, type=int,
                         help='Number of bins')
-    parser.add_argument('-nf', '--n_frames', type=int,
-                        help='Total number of frames')
     parser.add_argument('-t', '--thresholds', type=float, nargs=2,
                         help='Thresholds for contact layers')
 
@@ -39,7 +39,7 @@ def surface(u, oxygen, slab, t_down, t_up, block):
         o_down = oxygen.positions[oxygen.positions[:, 2] < t_down]
         o_up = oxygen.positions[oxygen.positions[:, 2] > t_up]
 
-         # Shift top molecules due to asymmetry by half a lattice constant
+        # Shift top molecules due to asymmetry by half a lattice constant
         o_up[:, 0] += 2.81
 
         # Shift all molecules to account for slab centroid drift
@@ -55,7 +55,6 @@ def main():
     input = args.input
     n_jobs = args.n_cpu
     n_bins = args.n_bins
-    n_frames = args.n_frames
     a, b, c = args.cell_vectors
     t_down, t_up = args.thresholds
 
@@ -69,16 +68,7 @@ def main():
     oxygen = u.select_atoms('name O')
     slab = u.select_atoms('name Na or name Cl')
 
-    if n_frames is None:
-        print('Calculating number of frames: ', end='\r')
-        n_frames = u.trajectory.n_frames
-        print('Calculating number of frames: %i' % n_frames)
-
-    n_blocks = n_jobs
-    frames_per_block = n_frames//n_blocks
-    blocks = [range(i*frames_per_block, (i+1)*frames_per_block)
-              for i in range(n_blocks-1)]
-    blocks.append(range((n_blocks-1)*frames_per_block, n_frames))
+    blocks = trj2blocks.get_blocks(u, n_jobs)
 
     print('Analyzing...')
     results = Parallel(n_jobs=n_jobs)(delayed(surface)(
