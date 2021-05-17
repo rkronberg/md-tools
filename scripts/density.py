@@ -24,8 +24,6 @@ def parse():
                         help='Lattice vectors in angstroms (a, b, c)', nargs=3)
     parser.add_argument('-b', '--bin_size', required=True, type=float,
                         help='Bin width in angstroms')
-    parser.add_argument('-f', '--n_frames', type=int,
-                        help='Total number of frames')
 
     return parser.parse_args()
 
@@ -44,7 +42,6 @@ def main():
     input = args.input
     n_jobs = args.n_cpu
     binsize = args.bin_size
-    n_frames = args.n_frames
     a, b, c = args.cell_vectors
 
     CURRENT_PATH = path.dirname(path.realpath(__file__))

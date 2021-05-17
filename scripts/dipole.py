@@ -24,8 +24,6 @@ def parse():
                         help='Lattice vectors in angstroms (a, b, c)', nargs=3)
     parser.add_argument('-nb', '--n_bins', required=True, type=int,
                         help='Number of bins')
-    parser.add_argument('-nf', '--n_frames', type=int,
-                        help='Total number of frames')
     parser.add_argument('-t', '--thresholds', type=float, nargs=2,
                         help='Thresholds for contact layers')
 
@@ -45,15 +43,16 @@ def dipole(u, oxygen, hydrogen, t_down, t_up, block):
         for j, pos in enumerate(oxygen.positions):
             if pos[2] < t_down:
                 hbound = hydrogen.positions[(rOH < 1.2)[j]]
-                dip = np.sum(hbound, axis=0)-oxygen.positions[j]
+                dip = np.sum(hbound, axis=0)-pos
+                unit_dip = dip/np.linalg.norm(dip)
+                cos_theta.append(unit_dip[2])
             elif pos[2] > t_up:
                 hbound = hydrogen.positions[(rOH < 1.2)[j]]
-                dip = oxygen.positions[j]-np.sum(hbound, axis=0)
+                dip = np.sum(hbound, axis=0)-pos
+                unit_dip = dip/np.linalg.norm(dip)
+                cos_theta.append(-unit_dip[2])
             else:
                 continue
-
-            unit_dip = dip/np.linalg.norm(dip)
-            cos_theta.append(unit_dip[2])
 
     return np.array(cos_theta)
 
@@ -64,7 +63,6 @@ def main():
     input = args.input
     n_jobs = args.n_cpu
     n_bins = args.n_bins
-    n_frames = args.n_frames
     a, b, c = args.cell_vectors
     t_down, t_up = args.thresholds
 

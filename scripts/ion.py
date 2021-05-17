@@ -28,8 +28,6 @@ def parse():
                         help='Type of ionic species (H3O+ or OH-)')
     parser.add_argument('-ns', '--n_species', required=True, type=int,
                         help='Number of ionic species')
-    parser.add_argument('-nf', '--n_frames', type=int,
-                        help='Total number of frames')
 
     return parser.parse_args()
 
@@ -68,7 +66,6 @@ def main():
     input = args.input
     n_jobs = args.n_cpu
     binsize = args.bin_size
-    n_frames = args.n_frames
     species = args.species
     n_species = args.n_species
     a, b, c = args.cell_vectors
