@@ -20,44 +20,40 @@ def parse():
                         help='Number of CPUs for parallel processing')
     parser.add_argument('-c', '--cell_vectors', required=True, type=float,
                         help='Lattice vectors in angstroms (a, b, c)', nargs=3)
-    parser.add_argument('-b', '--bin_size', required=True, type=float,
-                        help='Bin width in angstroms')
-    parser.add_argument('-s', '--species', required=True, type=str,
-                        help='Type of ionic species (H3O+ or OH-)')
-    parser.add_argument('-ns', '--n_species', required=True, type=int,
-                        help='Number of ionic species')
+    parser.add_argument('-nb', '--n_bins', required=True, type=int,
+                        help='Number of bins')
     parser.add_argument('-nf', '--n_frames', type=int,
                         help='Total number of frames')
+    parser.add_argument('-t', '--thresholds', type=float, nargs=2,
+                        help='Thresholds for contact layers')
 
     return parser.parse_args()
 
 
-def sort_acid(CN, n_species):
+def dipole(u, oxygen, hydrogen, t_down, t_up, block):
 
-    return np.argpartition(CN, -n_species)[-n_species:]
-
-
-def sort_base(CN, n_species):
-
-    return np.argpartition(CN, n_species)[:n_species]
-
-
-def ions(u, oxygen, hydrogen, n_species, func, block):
-
-    rc = 1.32
-    z_ion = np.zeros((len(block), n_species))
     rOH = np.zeros((len(oxygen), len(hydrogen)))
+    cos_theta = []
 
     for i, ts in enumerate(u.trajectory[block.start:block.stop]):
         print('Processing blocks %.1f%%' % (100*i/len(block)), end='\r')
         distance_array(oxygen.positions, hydrogen.positions,
                        box=u.dimensions, result=rOH)
-        CN = np.sum((1-(rOH/rc)**16)/(1-(rOH/rc)**56), axis=1)
-        ind = func(CN, n_species)
-        print(CN[ind])
-        z_ion[i, :] = oxygen.positions[ind][:, 2]
 
-    return z_ion
+        for j, pos in enumerate(oxygen.positions):
+            if pos[2] < t_down:
+                hbound = hydrogen.positions[(rOH < 1.2)[j]]
+                dip = np.sum(hbound, axis=0)-oxygen.positions[j]
+            elif pos[2] > t_up:
+                hbound = hydrogen.positions[(rOH < 1.2)[j]]
+                dip = oxygen.positions[j]-np.sum(hbound, axis=0)
+            else:
+                continue
+
+            unit_dip = dip/np.linalg.norm(dip)
+            cos_theta.append(unit_dip[2])
+
+    return np.array(cos_theta)
 
 
 def main():
@@ -65,11 +61,10 @@ def main():
     args = parse()
     input = args.input
     n_jobs = args.n_cpu
-    binsize = args.bin_size
+    n_bins = args.n_bins
     n_frames = args.n_frames
-    species = args.species
-    n_species = args.n_species
     a, b, c = args.cell_vectors
+    t_down, t_up = args.thresholds
 
     CURRENT_PATH = path.dirname(path.realpath(__file__))
     DATA_PATH = path.normpath(path.join(CURRENT_PATH, path.dirname(input)))
@@ -80,11 +75,6 @@ def main():
     u.dimensions = np.array([a, b, c, 90, 90, 90])
     oxygen = u.select_atoms('name O')
     hydrogen = u.select_atoms('name H')
-
-    if species == 'H3O+':
-        func = sort_acid
-    elif species == 'OH-':
-        func = sort_base
 
     if n_frames is None:
         print('Calculating number of frames: ', end='\r')
@@ -97,18 +87,17 @@ def main():
               for i in range(n_blocks-1)]
     blocks.append(range((n_blocks-1)*frames_per_block, n_frames))
 
-    nbins = int(c//binsize)
-    z = np.linspace(binsize, c-binsize, nbins)
+    cosine = np.linspace(-1, 1, n_bins)
 
     print('Analyzing...')
-    results = Parallel(n_jobs=n_jobs)(delayed(ions)(
-        u, oxygen, hydrogen, n_species, func, block) for block in blocks)
+    results = Parallel(n_jobs=n_jobs)(delayed(dipole)(
+        u, oxygen, hydrogen, t_down, t_up, block) for block in blocks)
 
     results = np.concatenate(results).ravel()
-    hist, _ = np.histogram(results, bins=nbins, range=(0.0, c), density=True)
+    hist, _ = np.histogram(results, bins=n_bins, range=(-1, 1), density=True)
 
-    df = pd.DataFrame({'z-coord': z, 'density': hist})
-    df.to_csv('%s/%s.ions' % (DATA_PATH, base), index=False)
+    df = pd.DataFrame({'cosine': cosine, 'density': hist})
+    df.to_csv('%s/%s.adist' % (DATA_PATH, base), index=False)
 
     print('\nProgram executed in %.0f seconds' % (time()-t0))
 
