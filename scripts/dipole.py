@@ -30,7 +30,7 @@ def parse():
     return parser.parse_args()
 
 
-def dipole(u, oxygen, hydrogen, t_down, t_up, block):
+def dipole(u, a, oxygen, hydrogen, t_down, t_up, block):
 
     rOH = np.zeros((len(oxygen), len(hydrogen)))
     cos_theta = []
@@ -54,8 +54,8 @@ def dipole(u, oxygen, hydrogen, t_down, t_up, block):
                     continue
 
                 # Combine broken water molecules
-                hbound[hbound-pos < -1.2] += 16.86
-                hbound[hbound-pos > 1.2] -= 16.86
+                hbound[hbound-pos < -1.2] += a
+                hbound[hbound-pos > 1.2] -= a
 
                 # Compute dipole vector
                 dip = np.mean(hbound, axis=0)-pos
@@ -72,8 +72,8 @@ def dipole(u, oxygen, hydrogen, t_down, t_up, block):
                     continue
 
                 # Combine broken water molecules
-                hbound[hbound-pos < -1.2] += 16.86
-                hbound[hbound-pos > 1.2] -= 16.86
+                hbound[hbound-pos < -1.2] += a
+                hbound[hbound-pos > 1.2] -= a
 
                 # Compute dipole vector
                 dip = np.mean(hbound, axis=0)-pos
@@ -111,7 +111,7 @@ def main():
 
     print('Analyzing...')
     results = Parallel(n_jobs=n_jobs)(delayed(dipole)(
-        u, oxygen, hydrogen, t_down, t_up, block) for block in blocks)
+        u, a, oxygen, hydrogen, t_down, t_up, block) for block in blocks)
 
     results = np.concatenate(results).ravel()
     hist, _ = np.histogram(results, bins=n_bins, range=(-1, 1), density=True)
