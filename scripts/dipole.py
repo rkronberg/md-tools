@@ -37,20 +37,49 @@ def dipole(u, oxygen, hydrogen, t_down, t_up, block):
 
     for i, ts in enumerate(u.trajectory[block.start:block.stop]):
         print('Processing blocks %.1f%%' % (100*i/len(block)), end='\r')
+        oxygen.wrap(box=u.dimensions)
+        hydrogen.wrap(box=u.dimensions)
         distance_array(oxygen.positions, hydrogen.positions,
                        box=u.dimensions, result=rOH)
 
+        # Loop over oxygen atoms
         for j, pos in enumerate(oxygen.positions):
             if pos[2] < t_down:
+
+                # Get bound hydrogens
                 hbound = hydrogen.positions[(rOH < 1.2)[j]]
-                dip = np.sum(hbound, axis=0)-pos
+
+                # Exclude ions
+                if len(hbound) != 2:
+                    continue
+
+                # Combine broken water molecules
+                hbound[hbound-pos < -1.2] += 16.86
+                hbound[hbound-pos > 1.2] -= 16.86
+
+                # Compute dipole vector
+                dip = np.mean(hbound, axis=0)-pos
                 unit_dip = dip/np.linalg.norm(dip)
                 cos_theta.append(unit_dip[2])
+
             elif pos[2] > t_up:
+
+                # Get bound hydrogens
                 hbound = hydrogen.positions[(rOH < 1.2)[j]]
-                dip = np.sum(hbound, axis=0)-pos
+
+                # Exclude ions
+                if len(hbound) != 2:
+                    continue
+
+                # Combine broken water molecules
+                hbound[hbound-pos < -1.2] += 16.86
+                hbound[hbound-pos > 1.2] -= 16.86
+
+                # Compute dipole vector
+                dip = np.mean(hbound, axis=0)-pos
                 unit_dip = dip/np.linalg.norm(dip)
                 cos_theta.append(-unit_dip[2])
+
             else:
                 continue
 
