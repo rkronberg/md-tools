@@ -9,7 +9,7 @@ import trj2blocks
 
 # MDAnalysis
 import MDAnalysis as mda
-from MDAnalysis.analysis.distances import distance_array
+from MDAnalysis.analysis.rdf import InterRDF
 
 
 def parse():
@@ -19,8 +19,7 @@ def parse():
         Namespace object containing input arguments.
     '''
 
-    # Parse command line arguments
-    parser = ArgumentParser(description='MDTools: Surface distribution')
+    parser = ArgumentParser(description='MDTools: Radial distribution func.')
     parser.add_argument('-i', '--input', required=True, type=str,
                         help='Input .xyz file')
     parser.add_argument('-n', '--n_cpu', required=True, type=int,
@@ -29,48 +28,42 @@ def parse():
                         help='Lattice vectors in angstroms (a, b, c)', nargs=3)
     parser.add_argument('-nb', '--n_bins', required=True, type=int,
                         help='Number of bins')
-    parser.add_argument('-t', '--thresholds', type=float, nargs=4,
-                        help='Thresholds for solvent layers')
+    parser.add_argument('-t', '--thresholds', required=True, type=float,
+                        help='Thresholds for solvation layers', nargs=4)
+    parser.add_argument('-p', '--pair', required=True, type=str,
+                        help='Which pair of elements to consider')
 
     return parser.parse_args()
 
 
-def surface(u, t, block):
-    '''Computes 2D surface (lateral) distribution of atom within specified
-    layers.
+def rdf(u, thresholds, n_bins, pair, block):
+    '''Computes water radial distribution functions (RDF).
 
     Args:
         u: MDAnalysis Universe object containing trajectory.
         t: Thresholds specifying layer boundaries.
+        n_bins: Number of bins for RDF.
+        pair: Pair of elements to consider.
         block: Range of frames composing block.
 
     Returns:
-        x and y coordinates of atoms in layer.
+        Linear density profile.
     '''
 
-    # Select oxygens, slab atoms (NaCl)
-    oxygen = u.select_atoms('name O')
-    slab = u.select_atoms('name Na or name Cl')
+    atoms = list(pair)
 
-    xy = []
+    # Select appropriate atom groups within specified layers
+    down = 'prop z > %s and prop z < %s' % (*thresholds[:2],)
+    up = 'prop z > %s and prop z < %s' % (*thresholds[2:],)
+    ag1 = u.select_atoms('name %s and ((%s) or (%s))' % (atoms[0], down, up),
+                         updating=True)
+    ag2 = u.select_atoms('name %s' % atoms[1])
 
-    for i, ts in enumerate(u.trajectory[block.start:block.stop]):
-        print('Processing blocks %.1f%%' % (100*i/len(block)), end='\r')
+    # Compute the RDF between ag1 and ag2
+    rdf = InterRDF(ag1, ag2, nbins=n_bins, range=(0, 6), verbose=True)
+    rdf.run(start=block.start, stop=block.stop)
 
-        # Get oxygens within given thresholds
-        bot = (oxygen.positions[:, 2] > t[0]) & (oxygen.positions[:, 2] < t[1])
-        top = (oxygen.positions[:, 2] > t[2]) & (oxygen.positions[:, 2] < t[3])
-        o_down = oxygen.positions[bot]
-        o_up = oxygen.positions[top]
-
-        # Shift top molecules due to asymmetry by half a lattice constant
-        o_up[:, 0] += 2.81
-
-        # Shift all molecules to account for slab centroid drift
-        shift = slab.centroid()[:-1]
-        xy.append(np.vstack((o_down[:, :-1]-shift, o_up[:, :-1]-shift)))
-
-    return np.concatenate(xy)
+    return (rdf.results.bins, rdf.results.rdf)
 
 
 def main():
@@ -81,6 +74,7 @@ def main():
     n_bins = args.n_bins
     a, b, c = args.cell_vectors
     thresholds = args.thresholds
+    pair = args.pair
 
     CURRENT_PATH = path.dirname(path.realpath(__file__))
     DATA_PATH = path.normpath(path.join(CURRENT_PATH, path.dirname(input)))
@@ -95,21 +89,15 @@ def main():
     blocks = trj2blocks.get_blocks(u, n_jobs)
 
     print('Analyzing...')
-    results = Parallel(n_jobs=n_jobs)(delayed(surface)(
-        u, thresholds, block) for block in blocks)
+    results = Parallel(n_jobs=n_jobs)(delayed(rdf)(
+        u, thresholds, n_bins, pair, block) for block in blocks)
 
-    results = np.concatenate(results)
-
-    # Assuming square lateral cell dimensions
-    results[results > a] -= a
-    results[results < 0] += a
-
-    hist, _, _ = np.histogram2d(results[:, 0], results[:, 1], bins=n_bins,
-                                range=[[0, a]]*2, density=True)
+    # Average RDFs over all blocks
+    results = np.mean(results, axis=0)
 
     # Save results as .csv
-    df = pd.DataFrame(hist)
-    df.to_csv('%s/%s.sdist' % (DATA_PATH, base), index=False)
+    df = pd.DataFrame({'z-coord': results[0], 'rdf': results[1]})
+    df.to_csv('%s/%s.rdf' % (DATA_PATH, base), index=False)
 
     print('\nProgram executed in %.0f seconds' % (time()-t0))
 

@@ -1,10 +1,13 @@
-'''
-Divides trajectory frames into as many blocks
-as the number of requested parallel jobs.
-'''
-
-
 def get_blocks(u, n_jobs):
+    '''Divides trajectory into blocks.
+
+    Args:
+        u: MDAnalysis Universe object containing input trajectory.
+        n_blocks: Number of blocks trajectory is split into.
+
+    Returns:
+        List of ranges specifying the indices forming each block.
+    '''
 
     print('Calculating number of frames: ', end='\r')
     n_frames = u.trajectory.n_frames

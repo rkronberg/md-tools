@@ -4,12 +4,16 @@ from joblib import Parallel, delayed
 from argparse import ArgumentParser
 from os import path
 from time import time
+from scipy.ndimage import find_objects, label
 
 import trj2blocks
+import tolerant
 
 # MDAnalysis
 import MDAnalysis as mda
-from MDAnalysis.analysis.distances import distance_array
+
+# tidynamics
+import tidynamics
 
 
 def parse():
@@ -20,24 +24,22 @@ def parse():
     '''
 
     # Parse command line arguments
-    parser = ArgumentParser(description='MDTools: Surface distribution')
+    parser = ArgumentParser(description='MDTools: Mean squared displacement')
     parser.add_argument('-i', '--input', required=True, type=str,
                         help='Input .xyz file')
     parser.add_argument('-n', '--n_cpu', required=True, type=int,
                         help='Number of CPUs for parallel processing')
     parser.add_argument('-c', '--cell_vectors', required=True, type=float,
                         help='Lattice vectors in angstroms (a, b, c)', nargs=3)
-    parser.add_argument('-nb', '--n_bins', required=True, type=int,
-                        help='Number of bins')
-    parser.add_argument('-t', '--thresholds', type=float, nargs=4,
-                        help='Thresholds for solvent layers')
+    parser.add_argument('-t', '--thresholds', required=True, type=float,
+                        help='Thresholds for solvation layers', nargs=4)
 
     return parser.parse_args()
 
 
-def surface(u, t, block):
-    '''Computes 2D surface (lateral) distribution of atom within specified
-    layers.
+def diffusion(u, t, block):
+    '''Computes mean squared displacement of water molecules within specified
+    layers parallel to a surface.
 
     Args:
         u: MDAnalysis Universe object containing trajectory.
@@ -45,32 +47,39 @@ def surface(u, t, block):
         block: Range of frames composing block.
 
     Returns:
-        x and y coordinates of atoms in layer.
+        Parallel (xy) mean squared displacement.
     '''
 
-    # Select oxygens, slab atoms (NaCl)
+    # Select oxygen atoms
     oxygen = u.select_atoms('name O')
-    slab = u.select_atoms('name Na or name Cl')
+    msd = []
 
-    xy = []
+    # Initialize 3D position array (frame, atom, dimension)
+    position_array = np.zeros((len(block), oxygen.n_atoms, 3))
 
     for i, ts in enumerate(u.trajectory[block.start:block.stop]):
         print('Processing blocks %.1f%%' % (100*i/len(block)), end='\r')
 
-        # Get oxygens within given thresholds
-        bot = (oxygen.positions[:, 2] > t[0]) & (oxygen.positions[:, 2] < t[1])
-        top = (oxygen.positions[:, 2] > t[2]) & (oxygen.positions[:, 2] < t[3])
-        o_down = oxygen.positions[bot]
-        o_up = oxygen.positions[top]
+        # Store positions of all oxygens at current frame
+        position_array[i, :, :] = oxygen.positions
 
-        # Shift top molecules due to asymmetry by half a lattice constant
-        o_up[:, 0] += 2.81
+    # Loop over oxygen atoms
+    for k in range(oxygen.n_atoms):
 
-        # Shift all molecules to account for slab centroid drift
-        shift = slab.centroid()[:-1]
-        xy.append(np.vstack((o_down[:, :-1]-shift, o_up[:, :-1]-shift)))
+        # Get atoms in region
+        z = position_array[:, k, 2]
+        z_bool = (z > t[0])*(z < t[1])+(z > t[2])*(z < t[3])
 
-    return np.concatenate(xy)
+        # Get intervals in which atom remains continuously in region
+        contiguous_region = find_objects(label(z_bool)[0])
+
+        # Compute mean squared displacement of atom for each interval
+        for reg in contiguous_region:
+            msd.append(tidynamics.msd(
+                position_array[reg[0].start:reg[0].stop, k, :2]))
+
+    # Return average of all MSDs
+    return tolerant.mean(msd)
 
 
 def main():
@@ -78,7 +87,6 @@ def main():
     args = parse()
     input = args.input
     n_jobs = args.n_cpu
-    n_bins = args.n_bins
     a, b, c = args.cell_vectors
     thresholds = args.thresholds
 
@@ -95,21 +103,17 @@ def main():
     blocks = trj2blocks.get_blocks(u, n_jobs)
 
     print('Analyzing...')
-    results = Parallel(n_jobs=n_jobs)(delayed(surface)(
+    results = Parallel(n_jobs=n_jobs)(delayed(diffusion)(
         u, thresholds, block) for block in blocks)
 
-    results = np.concatenate(results)
-
-    # Assuming square lateral cell dimensions
-    results[results > a] -= a
-    results[results < 0] += a
-
-    hist, _, _ = np.histogram2d(results[:, 0], results[:, 1], bins=n_bins,
-                                range=[[0, a]]*2, density=True)
+    # Average MSDs of (possibly) different length over all blocks
+    results = tolerant.mean(results)
+    t = np.arange(len(results))
 
     # Save results as .csv
-    df = pd.DataFrame(hist)
-    df.to_csv('%s/%s.sdist' % (DATA_PATH, base), index=False)
+    df = pd.DataFrame({'time': t, 'msd': results})
+    df.to_csv('%s/%s_%s.msd' % (
+        DATA_PATH, base, thresholds[1]), index=False)
 
     print('\nProgram executed in %.0f seconds' % (time()-t0))
 

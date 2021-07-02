@@ -13,9 +13,13 @@ from MDAnalysis.analysis.lineardensity import LinearDensity
 
 
 def parse():
+    '''Parse command line arguments.
 
-    # Parse command line arguments
-    parser = ArgumentParser(description='Molecular dynamics density tools')
+    Returns:
+        Namespace object containing input arguments.
+    '''
+
+    parser = ArgumentParser(description='MDTools: Linear water density')
     parser.add_argument('-i', '--input', required=True, type=str,
                         help='Input .xyz file')
     parser.add_argument('-n', '--n_cpu', required=True, type=int,
@@ -28,9 +32,23 @@ def parse():
     return parser.parse_args()
 
 
-def density(atomgroup, binsize, block):
+def density(u, binsize, block):
+    '''Computes linear water density profile perpendicular to a surface.
 
-    ldens = LinearDensity(atomgroup, binsize=binsize, verbose=True)
+    Args:
+        u: MDAnalysis Universe object containing trajectory.
+        binsize: Bin size for profile (histogram).
+        block: Range of frames composing block.
+
+    Returns:
+        Linear density profile.
+    '''
+
+    # Select water
+    water = u.select_atoms('name O or name H')
+
+    # Initialize and run linear density analysis
+    ldens = LinearDensity(water, binsize=binsize, verbose=True)
     ldens.run(start=block.start, stop=block.stop)
 
     return ldens.results.z.pos
@@ -48,21 +66,24 @@ def main():
     DATA_PATH = path.normpath(path.join(CURRENT_PATH, path.dirname(input)))
     base = path.splitext(path.basename(input))[0]
 
+    # Initialize universe (time step 0.5 fs)
     u = mda.Universe(input, dt=5e-4)
     u.add_TopologyAttr('charges')
     u.dimensions = np.array([a, b, c, 90, 90, 90])
-    water = u.select_atoms('name O or name H')
 
+    # Split trajectory into blocks
     blocks = trj2blocks.get_blocks(u, n_jobs)
 
+    # Compute number of bins, grid
     nbins = int(c//binsize)
-    z = np.linspace(binsize, c-binsize, nbins)
+    grid = np.linspace(binsize, c-binsize, nbins)
 
     print('Analyzing...')
     results = Parallel(n_jobs=n_jobs)(delayed(density)(
-        water, binsize, block) for block in blocks)
+        u, binsize, block) for block in blocks)
 
-    df = pd.DataFrame({'z-coord': z, 'density': np.mean(results, axis=0)})
+    # Save results as .csv
+    df = pd.DataFrame({'z-coord': grid, 'density': np.mean(results, axis=0)})
     df.to_csv('%s/%s.ldens' % (DATA_PATH, base), index=False)
 
     print('\nProgram executed in %.0f seconds' % (time()-t0))

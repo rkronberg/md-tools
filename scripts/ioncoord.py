@@ -19,7 +19,7 @@ def parse():
         Namespace object containing input arguments.
     '''
 
-    parser = ArgumentParser(description='MDTools: Water self-ion distribution')
+    parser = ArgumentParser(description='MDTools: Water self-ion coordination')
     parser.add_argument('-i', '--input', required=True, type=str,
                         help='Input .xyz file')
     parser.add_argument('-n', '--n_cpu', required=True, type=int,
@@ -66,8 +66,8 @@ def sort_base(CN, n_species):
     return np.argpartition(CN, n_species)[:n_species]
 
 
-def ions(u, n_species, func, block):
-    '''Computes distribution of water self-ions perpendicular to a surface.
+def ion_coord(u, n_species, func, block):
+    '''Computes coordination numbers of water self-ions.
 
     Args:
         u: MDAnalysis Universe object containing trajectory.
@@ -79,32 +79,37 @@ def ions(u, n_species, func, block):
         Distribution of ions perpendicular to surface.
     '''
 
+    rc = 1.32
+
     # Select oxygen and hydrogen atoms
     oxygen = u.select_atoms('name O')
     hydrogen = u.select_atoms('name H')
 
-    # Cutoff for coordination number switching function
-    rc = 1.32
-
-    # Initialize ion heights and OH distance array
-    z_ion = np.zeros((len(block), n_species))
+    # Initialize output, OH distance and OO distance arrays
+    out = np.zeros((n_species*len(block), 2))
     rOH = np.zeros((len(oxygen), len(hydrogen)))
+    rOO = np.zeros((len(oxygen), len(oxygen)))
 
     for i, ts in enumerate(u.trajectory[block.start:block.stop]):
         print('Processing blocks %.1f%%' % (100*i/len(block)), end='\r')
 
-        # Compute OH distance array and continuous coordination numbers
+        # Compute OH and OO distance arrays
         distance_array(oxygen.positions, hydrogen.positions,
                        box=u.dimensions, result=rOH)
-        CN = np.sum((1-(rOH/rc)**16)/(1-(rOH/rc)**56), axis=1)
+        distance_array(oxygen.positions, oxygen.positions,
+                       box=u.dimensions, result=rOO)
 
-        # Get hydronium/hydroxide indices
+        # Compute continuous coordination numbers (OH) and identify ions
+        CN = np.sum((1-(rOH/rc)**16)/(1-(rOH/rc)**56), axis=1)
         ind = func(CN, n_species)
 
-        # Store ion heights
-        z_ion[i, :] = oxygen.positions[ind][:, 2]
+        # Store ion positions and compute OO coordinations numbers (rOO < 3.3)
+        out[n_species*i:n_species*(i+1), 0] = oxygen.positions[ind][:, 2]
+        cn1 = len(rOO[ind[0]][(rOO[ind[0]] > 0) & (rOO[ind[0]] < 3.3)])
+        cn2 = len(rOO[ind[1]][(rOO[ind[1]] > 0) & (rOO[ind[1]] < 3.3)])
+        out[n_species*i:n_species*(i+1), 1] = [cn1, cn2]
 
-    return z_ion
+    return out
 
 
 def main():
@@ -112,7 +117,6 @@ def main():
     args = parse()
     input = args.input
     n_jobs = args.n_cpu
-    binsize = args.bin_size
     species = args.species
     n_species = args.n_species
     a, b, c = args.cell_vectors
@@ -135,21 +139,16 @@ def main():
     # Split trajectory into blocks
     blocks = trj2blocks.get_blocks(u, n_jobs)
 
-    # Compute number of bins, grid
-    nbins = int(c//binsize)
-    z = np.linspace(binsize, c-binsize, nbins)
-
     print('Analyzing...')
-    results = Parallel(n_jobs=n_jobs)(delayed(ions)(
+    results = Parallel(n_jobs=n_jobs)(delayed(ion_coord)(
         u, n_species, func, block) for block in blocks)
 
-    # Concatenate and ravel results, compute histogram (probability density)
-    results = np.concatenate(results).ravel()
-    hist, _ = np.histogram(results, bins=nbins, range=(0.0, c), density=True)
+    # Concatenate results
+    results = np.concatenate(results)
 
     # Save results as .csv
-    df = pd.DataFrame({'z-coord': z, 'density': hist})
-    df.to_csv('%s/%s.ions' % (DATA_PATH, base), index=False)
+    df = pd.DataFrame({'z-coord': results[:, 0], 'cnum': results[:, 1]})
+    df.to_csv('%s/%s.ion_coord' % (DATA_PATH, base), index=False)
 
     print('\nProgram executed in %.0f seconds' % (time()-t0))
 

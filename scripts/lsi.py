@@ -19,8 +19,7 @@ def parse():
         Namespace object containing input arguments.
     '''
 
-    # Parse command line arguments
-    parser = ArgumentParser(description='MDTools: Surface distribution')
+    parser = ArgumentParser(description='MDTools: Local structure index')
     parser.add_argument('-i', '--input', required=True, type=str,
                         help='Input .xyz file')
     parser.add_argument('-n', '--n_cpu', required=True, type=int,
@@ -29,48 +28,53 @@ def parse():
                         help='Lattice vectors in angstroms (a, b, c)', nargs=3)
     parser.add_argument('-nb', '--n_bins', required=True, type=int,
                         help='Number of bins')
-    parser.add_argument('-t', '--thresholds', type=float, nargs=4,
-                        help='Thresholds for solvent layers')
 
     return parser.parse_args()
 
 
-def surface(u, t, block):
-    '''Computes 2D surface (lateral) distribution of atom within specified
-    layers.
+def lsi(u, block):
+    '''Computes local structure index (LSI).
 
     Args:
         u: MDAnalysis Universe object containing trajectory.
-        t: Thresholds specifying layer boundaries.
         block: Range of frames composing block.
 
     Returns:
-        x and y coordinates of atoms in layer.
+        Local structure index and heights of each oxygen.
     '''
 
-    # Select oxygens, slab atoms (NaCl)
+    # Select oxygen atoms
     oxygen = u.select_atoms('name O')
-    slab = u.select_atoms('name Na or name Cl')
 
-    xy = []
+    # Initialize OO distance array
+    rOO = np.zeros((len(oxygen), len(oxygen)))
+    lsindex = []
+    height = []
 
     for i, ts in enumerate(u.trajectory[block.start:block.stop]):
         print('Processing blocks %.1f%%' % (100*i/len(block)), end='\r')
 
-        # Get oxygens within given thresholds
-        bot = (oxygen.positions[:, 2] > t[0]) & (oxygen.positions[:, 2] < t[1])
-        top = (oxygen.positions[:, 2] > t[2]) & (oxygen.positions[:, 2] < t[3])
-        o_down = oxygen.positions[bot]
-        o_up = oxygen.positions[top]
+        # Compute OO distance array
+        distance_array(oxygen.positions, oxygen.positions,
+                       box=u.dimensions, result=rOO)
 
-        # Shift top molecules due to asymmetry by half a lattice constant
-        o_up[:, 0] += 2.81
+        # Loop over oxygen atoms
+        for j, pos in enumerate(oxygen.positions):
 
-        # Shift all molecules to account for slab centroid drift
-        shift = slab.centroid()[:-1]
-        xy.append(np.vstack((o_down[:, :-1]-shift, o_up[:, :-1]-shift)))
+            # Sort OO distance
+            r = np.sort(rOO[j])
 
-    return np.concatenate(xy)
+            # Consider all OO distances less than 3.7 angstrom
+            delta = r[np.roll((r > 0)*(r < 3.7), 1)]-r[(r > 0)*(r < 3.7)]
+
+            # Get mean and evaluate LSI as mean of squared differences to mean
+            ave = np.mean(delta)
+            lsindex.append(np.sum((delta-ave)**2)/len(delta))
+
+            # Store height of oxygen
+            height.append(pos[2])
+
+    return np.vstack((lsindex, height)).T
 
 
 def main():
@@ -80,7 +84,6 @@ def main():
     n_jobs = args.n_cpu
     n_bins = args.n_bins
     a, b, c = args.cell_vectors
-    thresholds = args.thresholds
 
     CURRENT_PATH = path.dirname(path.realpath(__file__))
     DATA_PATH = path.normpath(path.join(CURRENT_PATH, path.dirname(input)))
@@ -95,21 +98,20 @@ def main():
     blocks = trj2blocks.get_blocks(u, n_jobs)
 
     print('Analyzing...')
-    results = Parallel(n_jobs=n_jobs)(delayed(surface)(
-        u, thresholds, block) for block in blocks)
+    results = Parallel(n_jobs=n_jobs)(delayed(lsi)(
+        u, block) for block in blocks)
 
+    # Concatenate results
     results = np.concatenate(results)
 
-    # Assuming square lateral cell dimensions
-    results[results > a] -= a
-    results[results < 0] += a
-
-    hist, _, _ = np.histogram2d(results[:, 0], results[:, 1], bins=n_bins,
-                                range=[[0, a]]*2, density=True)
+    # Compute 2D histogram (heights vs LSI)
+    hist2d, _, _ = np.histogram2d(results[:, 0], results[:, 1],
+                                  bins=(n_bins, 2*n_bins), density=True,
+                                  range=[[0, 0.3], [9.85, 42.65]])
 
     # Save results as .csv
-    df = pd.DataFrame(hist)
-    df.to_csv('%s/%s.sdist' % (DATA_PATH, base), index=False)
+    df = pd.DataFrame(hist2d)
+    df.to_csv('%s/%s.lsi' % (DATA_PATH, base), index=False)
 
     print('\nProgram executed in %.0f seconds' % (time()-t0))
 
