@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from os import path
 from time import time
 
-import trj2blocks
+from utils import trj2blocks
 
 # MDAnalysis
 import MDAnalysis as mda
@@ -19,7 +19,7 @@ def parse():
         Namespace object containing input arguments.
     '''
 
-    parser = ArgumentParser(description='MDTools: Water dipole orientation')
+    parser = ArgumentParser(description='MDTools: Water dipole orientations')
     parser.add_argument('-i', '--input', required=True, type=str,
                         help='Input .xyz file')
     parser.add_argument('-n', '--n_cpu', required=True, type=int,
@@ -97,7 +97,7 @@ def dipole(u, a, thresholds, block):
                 if len(hbound) != 2:
                     continue
 
-                # Combine molecules broken across periodic boundariess
+                # Combine molecules broken across periodic boundaries
                 hbound[hbound-pos < -1.2] += a
                 hbound[hbound-pos > 1.2] -= a
 

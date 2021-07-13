@@ -6,8 +6,7 @@ from os import path
 from time import time
 from scipy.ndimage import find_objects, label
 
-import trj2blocks
-import tolerant
+from utils import trj2blocks, tolerant
 
 # MDAnalysis
 import MDAnalysis as mda

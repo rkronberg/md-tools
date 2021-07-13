@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from os import path
 from time import time
 
-import trj2blocks
+from utils import trj2blocks
 
 # MDAnalysis
 import MDAnalysis as mda
@@ -19,7 +19,7 @@ def parse():
         Namespace object containing input arguments.
     '''
 
-    parser = ArgumentParser(description='MDTools: Proton transfer coordinate')
+    parser = ArgumentParser(description='MDTools: Proton transfer analysis')
     parser.add_argument('-i', '--input', required=True, type=str,
                         help='Input .xyz file')
     parser.add_argument('-n', '--n_cpu', required=True, type=int,
@@ -34,25 +34,27 @@ def parse():
     return parser.parse_args()
 
 
-def barrier(u, n_species, block):
-    '''Computes the proton transfer (PT) coordinate of the most active protons.
+def proton_transfer(u, n_ion, block):
+    '''Computes proton transfer (PT) coordinate, OO distance and coordination
+    number (CN) for the n_ion most active charge defects in water
 
     Args:
         u: MDAnalysis Universe object containing trajectory.
-        n_species: Expected number of ions in the solution
+        n_ion: Expected number of ions in the solution.
         block: Range of frames composing block.
 
     Returns:
-        PT coordinates and heights of the most active protons.
+        Array of PT coordinates, OO-distances and (acceptor) CNs
     '''
 
     # Select oxygen and hydrogen atoms
     oxygen = u.select_atoms('name O')
     hydrogen = u.select_atoms('name H')
 
-    # Initialize HO distance array, PT coordinate array
+    # Initialize HO, OO distance arrays, output array
     rHO = np.zeros((len(hydrogen), len(oxygen)))
-    delta_min = np.zeros((n_species*len(block), 2))
+    rOO = np.zeros((len(oxygen), len(oxygen)))
+    out = np.zeros((n_ion*len(block), 4))
 
     for i, ts in enumerate(u.trajectory[block.start:block.stop]):
         print('Processing blocks %.1f%%' % (100*i/len(block)), end='\r')
@@ -69,19 +71,31 @@ def barrier(u, n_species, block):
         mask[np.arange(ind.shape[0])[:, None], ind] = True
 
         # Get HO distance from each hydrogen to two nearest oxygens
-        rmin = rHO[mask].reshape((len(hydrogen), n_species))
+        rmin = rHO[mask].reshape((len(hydrogen), n_ion))
 
         # Compute proton transfer coordinate for all hydrogens
         delta = rmin[:, 0]-rmin[:, 1]
 
         # Select two smallest delta (most active protons)
-        ind = np.argpartition(abs(delta), n_species)[:n_species]
+        idx = np.argpartition(abs(delta), n_ion)[:n_ion]
 
-        # Store minimum deltas and heights of respective protons
-        delta_min[n_species*i:n_species*(i+1), 0] = delta[ind]
-        delta_min[n_species*i:n_species*(i+1), 1] = hydrogen.positions[ind, 2]
+        # Select donor and acceptor oxygens of the most active protons
+        oidx = np.argpartition(rHO[idx], n_ion, axis=1)[:, :n_ion]
 
-    return delta_min
+        # Compute OO distance array
+        distance_array(oxygen.positions, oxygen.positions,
+                       box=u.dimensions, result=rOO)
+
+        # Calculate CNs of the acceptor oxygens (-1)
+        cns = [len(r[(r < 3.3) & (r > 0)]) for r in rOO[oidx[:, -1]]]
+
+        # Store minimum deltas, respective protons heights, OO distances, CNs
+        out[n_ion*i:n_ion*(i+1), 0] = delta[idx]
+        out[n_ion*i:n_ion*(i+1), 1] = hydrogen.positions[idx, 2]
+        out[n_ion*i:n_ion*(i+1), 2] = [rOO[tuple(j)] for j in oidx]
+        out[n_ion*i:n_ion*(i+1), 3] = cns
+
+    return out
 
 
 def main():
@@ -106,12 +120,17 @@ def main():
     blocks = trj2blocks.get_blocks(u, n_jobs)
 
     print('Analyzing...')
-    results = Parallel(n_jobs=n_jobs)(delayed(barrier)(
+    results = Parallel(n_jobs=n_jobs)(delayed(proton_transfer)(
         u, n_species, block) for block in blocks)
 
     # Concatenate results, compute PT coordinate grid
     results = np.concatenate(results)
     delta = np.linspace(-1, 1, n_bins)
+
+    # Save raw data as .csv
+    df = pd.DataFrame({'delta': results[:, 0], 'z-coord': results[:, 1],
+                       'OO-dist': results[:, 2], 'cnum': results[:, 3]})
+    df.to_csv('%s/%s.pt' % (DATA_PATH, base), index=False)
 
     # Boolean indexing of protons in different layers
     cond1 = np.logical_or(results[:, 1] < 13.95, results[:, 1] > 38.55)

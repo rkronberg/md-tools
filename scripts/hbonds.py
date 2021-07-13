@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from os import path
 from time import time
 
-import trj2blocks
+from utils import trj2blocks
 
 # MDAnalysis
 import MDAnalysis as mda

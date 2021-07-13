@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from os import path
 from time import time
 
-import trj2blocks
+from utils import trj2blocks
 
 # MDAnalysis
 import MDAnalysis as mda
@@ -33,11 +33,11 @@ def parse():
 
 
 def density(u, binsize, block):
-    '''Computes linear water density profile perpendicular to a surface.
+    '''Computes water density profile perpendicular to a surface.
 
     Args:
         u: MDAnalysis Universe object containing trajectory.
-        binsize: Bin size for profile (histogram).
+        binsize: Bin size of profile (histogram).
         block: Range of frames composing block.
 
     Returns:

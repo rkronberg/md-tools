@@ -5,11 +5,10 @@ from argparse import ArgumentParser
 from os import path
 from time import time
 
-import trj2blocks
+from utils import trj2blocks
 
 # MDAnalysis
 import MDAnalysis as mda
-from MDAnalysis.analysis.distances import distance_array
 
 
 def parse():
@@ -20,7 +19,7 @@ def parse():
     '''
 
     # Parse command line arguments
-    parser = ArgumentParser(description='MDTools: Surface distribution')
+    parser = ArgumentParser(description='MDTools: Lateral water distribution')
     parser.add_argument('-i', '--input', required=True, type=str,
                         help='Input .xyz file')
     parser.add_argument('-n', '--n_cpu', required=True, type=int,
@@ -36,8 +35,8 @@ def parse():
 
 
 def surface(u, t, block):
-    '''Computes 2D surface (lateral) distribution of atom within specified
-    layers.
+    '''Computes 2D surface (lateral) distribution of water within specified
+    layer(s).
 
     Args:
         u: MDAnalysis Universe object containing trajectory.

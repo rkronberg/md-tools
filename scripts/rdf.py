@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from os import path
 from time import time
 
-import trj2blocks
+from utils import trj2blocks
 
 # MDAnalysis
 import MDAnalysis as mda
@@ -47,7 +47,7 @@ def rdf(u, thresholds, n_bins, pair, block):
         block: Range of frames composing block.
 
     Returns:
-        Linear density profile.
+        Radial distribution function.
     '''
 
     atoms = list(pair)
