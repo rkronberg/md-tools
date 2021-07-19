@@ -68,8 +68,8 @@ def hbonds(u, block):
         for j, idx in enumerate(oxygen.indices):
 
             # Get number of accepted and donated HBs + position along z
-            acc_counts[i, j] = len(step[(step[:, 1] == idx)])
-            don_counts[i, j] = len(step[(step[:, 3] == idx)])
+            don_counts[i, j] = len(step[(step[:, 1] == idx)])
+            acc_counts[i, j] = len(step[(step[:, 3] == idx)])
             heights[i, j] = oxygen[j].position[2]
 
     return np.stack((heights, acc_counts, don_counts))
