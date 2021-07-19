@@ -2,7 +2,7 @@ import numpy as np
 
 
 def mean(list_of_arrays):
-    '''Computes mean over arrays of different length.
+    '''Computes mean of arrays of different length.
 
     Args:
         list_of_arrays: List of arrays.

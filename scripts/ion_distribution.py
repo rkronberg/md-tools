@@ -36,34 +36,44 @@ def parse():
     return parser.parse_args()
 
 
-def sort_acid(CN, n_species):
+def sort_acid(rOH, n_species):
     '''Return indices of oxygens with the largest hydrogen coordination
     numbers (hydronium ions)
 
     Args:
-        CN: Generalized (continuous) coordination numbers
+        rOH: Array of distances from each O to each H
         n_species: Expected number of ions in the solution
 
     Returns:
         Indices of the hydronium oxygens
     '''
 
-    return np.argpartition(CN, -n_species)[-n_species:]
+    # Get 3 shortest OH distances and their variance
+    min_rOH = np.partition(rOH, 3, axis=1)[:, :3]
+    variance = np.var(min_rOH, axis=1)
+
+    # Return indices that minimize the variance
+    return np.argpartition(variance, n_species)[:n_species]
 
 
-def sort_base(CN, n_species):
+def sort_base(rOH, n_species):
     '''Return indices of oxygens with the smallest hydrogen coordination
     numbers (hydroxide ions)
 
     Args:
-        CN: Generalized (continuous) coordination numbers
+        rOH: Array of distances from each O to each H
         n_species: Expected number of ions in the solution
 
     Returns:
         Indices of the hydroxide oxygens
     '''
 
-    return np.argpartition(CN, n_species)[:n_species]
+    # Get 2 shortest OH distances and their variance
+    min_rOH = np.partition(rOH, 2, axis=1)[:, :2]
+    variance = np.var(min_rOH, axis=1)
+
+    # Return indices that maximize the variance
+    return np.argpartition(variance, -n_species)[-n_species:]
 
 
 def ion_coord(u, n_species, func, block):
@@ -84,9 +94,6 @@ def ion_coord(u, n_species, func, block):
     oxygen = u.select_atoms('name O')
     hydrogen = u.select_atoms('name H')
 
-    # Cutoff for coordination number switching function
-    rc = 1.32
-
     # Initialize output, OH, OO distance arrays
     out = np.zeros((n_species*len(block), 2))
     rOH = np.zeros((len(oxygen), len(hydrogen)))
@@ -101,11 +108,10 @@ def ion_coord(u, n_species, func, block):
         distance_array(oxygen.positions, oxygen.positions,
                        box=u.dimensions, result=rOO)
 
-        # Compute continuous coordination numbers (OH) and identify ions
-        CN = np.sum((1-(rOH/rc)**16)/(1-(rOH/rc)**56), axis=1)
-        ind = func(CN, n_species)
+        # Locate ions based on rOH variances
+        ind = func(rOH, n_species)
 
-        # Store ion positions and compute OO coordinations numbers (rOO < 3.3)
+        # Store ion positions and compute OO coordination numbers (rOO < 3.3)
         out[n_species*i:n_species*(i+1), 0] = oxygen.positions[ind][:, 2]
         cns = [len(r[(r > 0) & (r < 3.3)]) for r in rOO[ind]]
 
